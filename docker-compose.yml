@@ -1,0 +1,34 @@
+version: '3.8'
+services:
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    image: devops-poc/user-service:1.0.0
+    container_name: devops-poc-user-service
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+
+  product-service:
+    build:
+      context: ./services/product-service
+      dockerfile: Dockerfile
+    image: devops-poc/product-service:1.0.0
+    container_name: devops-poc-product-service
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+
+  order-service:
+    build:
+      context: ./services/order-service
+      dockerfile: Dockerfile
+    image: devops-poc/order-service:1.0.0
+    container_name: devops-poc-order-service
+    ports:
+      - "3003:3003"
+    environment:
+      - PORT=3003

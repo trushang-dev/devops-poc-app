@@ -151,6 +151,58 @@ docker.io/<username>/order-service:v1.0.0
 
 Avoid using `latest` as the GitOps deployment version.
 
+### Build images
+
+From the repository root (`devops-poc-app`) you can build images individually:
+
+```bash
+docker build -t devops-poc/user-service:1.0.0 ./services/user-service
+docker build -t devops-poc/product-service:1.0.0 ./services/product-service
+docker build -t devops-poc/order-service:1.0.0 ./services/order-service
+```
+
+Or use Docker Compose to build and start all services:
+
+```bash
+docker compose up --build -d
+```
+
+### Run containers
+
+Example (individual):
+
+```bash
+docker run --name devops-poc-user-service -p 3001:3001 -e PORT=3001 devops-poc/user-service:1.0.0
+```
+
+With Docker Compose the services are available on ports `3001`, `3002`, `3003`.
+
+### Test services
+
+```bash
+curl http://localhost:3001/health
+curl http://localhost:3001/users
+
+curl http://localhost:3002/health
+curl http://localhost:3002/products
+
+curl http://localhost:3003/health
+curl http://localhost:3003/orders
+
+curl http://localhost:3001/version
+```
+
+### Stop
+
+```bash
+docker compose down
+```
+
+Notes:
+- Images used during M3 are local only and not pushed to Docker Hub.
+- `latest` is intentionally not used as the primary release tag; versioned tags (e.g. `1.0.0`) are used.
+
+
 ## Development Rules
 
 - Keep application logic simple.
