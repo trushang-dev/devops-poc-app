@@ -104,6 +104,19 @@ release/*
 main
 ```
 
+This repository uses a simple Git branching model for development and releases:
+
+- feature/*: short-lived branches where new features are developed (example: `feature/add-user-profile`).
+- develop: integration branch where feature branches are merged and tested together.
+- release/*: stabilization branches created from `develop` for preparing a release (example: `release/1.0.0`).
+- main: production-ready branch representing released code.
+
+Workflow summary:
+
+feature/* -> develop -> release/* -> main
+
+`main` = production, `develop` = integration, `feature/*` = development work, `release/*` = release preparation.
+
 ## CI Workflow
 
 The eventual GitHub Actions pipeline will follow:
