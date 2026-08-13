@@ -14,25 +14,83 @@ This repository contains:
 
 Kubernetes and GitOps configuration belongs to the `devops-poc-gitops` repository.
 
+## M1 — Application
+
+M1 delivers three independent, runnable Node.js/Express services under `services/`. Each service uses an in-memory data set only — no database, authentication, or external dependency is required.
+
+```text
+devops-poc-app/
+├── services/
+│   ├── user-service/
+│   ├── product-service/
+│   └── order-service/
+├── README.md
+└── .gitignore
+```
+
 ## Services
 
-| Service | Port | Purpose |
-|---|---:|---|
-| user-service | 3001 | User APIs |
-| product-service | 3002 | Product APIs |
-| order-service | 3003 | Order APIs |
+| Service | Port | Purpose | Functional Endpoint |
+|---|---:|---|---|
+| user-service | 3001 | User APIs | `GET /users` |
+| product-service | 3002 | Product APIs | `GET /products` |
+| order-service | 3003 | Order APIs | `GET /orders` |
 
-Each service will expose:
+Each service exposes:
 
 ```text
 GET /health
 ```
 
-and will eventually expose Prometheus metrics through:
+returning HTTP 200 with the service name, status, and timestamp. Unknown routes return a JSON 404; unexpected errors return a JSON 500.
+
+Each service will eventually expose Prometheus metrics through:
 
 ```text
 GET /metrics
 ```
+
+### Install dependencies
+
+```bash
+cd services/user-service && npm install
+cd services/product-service && npm install
+cd services/order-service && npm install
+```
+
+### Run a service
+
+```bash
+cd services/user-service && npm start      # or: npm run dev
+```
+
+`PORT` is configurable via environment variable and defaults to the port listed above.
+
+### Example curl commands
+
+```bash
+curl http://localhost:3001/health
+curl http://localhost:3001/users
+
+curl http://localhost:3002/health
+curl http://localhost:3002/products
+
+curl http://localhost:3003/health
+curl http://localhost:3003/orders
+```
+
+### M1 scope
+
+M1 covers only the Node.js application layer. The following are intentionally **not** implemented yet and belong to later milestones:
+
+- Docker / docker-compose
+- Kubernetes manifests
+- Helm charts
+- Argo CD
+- GitHub Actions / CI/CD
+- Trivy scanning
+- Prometheus / Grafana
+- PostgreSQL or any other database
 
 ## Git Workflow
 
