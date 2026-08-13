@@ -1,0 +1,19 @@
+# Trivy ignore file for the M10 CI pipeline.
+#
+# Only add an entry here for a finding that has been explicitly reviewed
+# and documented (see PROJECT_SCOPE.md M9 severity policy). Do not add
+# blanket ignores. Each entry below must reference the specific
+# vulnerability ID and explain why it is excepted.
+
+# CVE-2026-59873 (CRITICAL) - tar, "Denial of Service via crafted gzip bomb".
+# Reviewed in M9 and confirmed again while building M10's CI pipeline
+# locally: this is inside npm's own bundled tooling
+# (usr/local/lib/node_modules/npm/...) baked into the node:22-alpine base
+# image, not a dependency of this application (app/node_modules contains
+# 0 vulnerabilities per the same scan - only "express" and its own small
+# transitive tree). The app never invokes npm's bundled tar. Fix is
+# upstream (a newer node:22-alpine release); nothing in this repo's code,
+# Dockerfiles, or dependencies can remediate it directly. Remove this
+# line once the base image ships a patched npm/tar.
+CVE-2026-59873
+

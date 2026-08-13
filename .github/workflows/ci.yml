@@ -1,0 +1,76 @@
+name: CI - Build, Scan, and Publish
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_VERSION: v0.73.0
+
+jobs:
+  build-scan-publish:
+    name: ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [user-service, product-service, order-service]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies (npm ci)
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
+          trivy --version
+
+      # M9 severity policy: report all severities for visibility, but only
+      # fail the pipeline on CRITICAL. HIGH/MEDIUM/LOW are visible in logs
+      # but do not block CI (see PROJECT_SCOPE.md M9 policy).
+      - name: Trivy filesystem scan - full report
+        run: |
+          trivy fs --severity CRITICAL,HIGH,MEDIUM,LOW --exit-code 0 --ignorefile /dev/null services/${{ matrix.service }}
+
+      - name: Trivy filesystem scan - policy gate (CRITICAL only)
+        run: |
+          trivy fs --severity CRITICAL --exit-code 1 --ignorefile "${{ github.workspace }}/.trivyignore" services/${{ matrix.service }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}" services/${{ matrix.service }}
+
+      - name: Trivy image scan - full report
+        run: |
+          trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --exit-code 0 --ignorefile /dev/null "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}"
+
+      - name: Trivy image scan - policy gate (CRITICAL only)
+        run: |
+          trivy image --severity CRITICAL --exit-code 1 --ignorefile "${{ github.workspace }}/.trivyignore" "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}"
+
+      # Docker Hub is only contacted on an approved push to develop - never
+      # from a pull_request, per the M10 PR-protection requirement.
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push image to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        run: |
+          docker push "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}"
