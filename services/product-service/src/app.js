@@ -15,13 +15,27 @@ const httpRequestsTotal = new client.Counter({
   registers: [register],
 });
 
+// Buckets are seconds, chosen to bracket the response times actually seen
+// under ApacheBench load testing (mean ~50ms, p99 in the low hundreds of ms).
+const httpRequestDurationSeconds = new client.Histogram({
+  name: 'http_request_duration_seconds',
+  help: 'HTTP request duration in seconds',
+  labelNames: ['method', 'route', 'status_code'],
+  buckets: [0.01, 0.05, 0.1, 0.3, 0.5, 1, 2, 5],
+  registers: [register],
+});
+
 app.use((req, res, next) => {
+  const startTime = process.hrtime.bigint();
   res.on('finish', () => {
-    httpRequestsTotal.inc({
+    const labels = {
       method: req.method,
       route: req.path,
       status_code: res.statusCode,
-    });
+    };
+    httpRequestsTotal.inc(labels);
+    const durationSeconds = Number(process.hrtime.bigint() - startTime) / 1e9;
+    httpRequestDurationSeconds.observe(labels, durationSeconds);
   });
   next();
 });
