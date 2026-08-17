@@ -2,7 +2,7 @@ name: CI - Build, Scan, and Publish
 
 on:
   push:
-    branches: [develop]
+    branches: [develop, "release/**"]
   pull_request:
     branches: [develop]
 
@@ -53,43 +53,68 @@ jobs:
         run: |
           trivy fs --severity CRITICAL --exit-code 1 --ignorefile "${{ github.workspace }}/.trivyignore" services/${{ matrix.service }}
 
+      # --- Everything below is release-only. Per the corrected §4
+      # release-promotion flow, feature/PR and plain develop pushes are
+      # validation-only (tests + Trivy fs scan above) - only a push to a
+      # release/* branch builds, scans, and publishes a deployable image. ---
+
+      - name: Extract release version from branch name
+        id: version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
+        run: echo "version=${GITHUB_REF_NAME#release/}" >> "$GITHUB_OUTPUT"
+
+      # Tagged twice: the release SemVer (e.g. v1.0.0) is the primary,
+      # human-meaningful deployment version per §5/§12's own examples; the
+      # git-sha tag is kept alongside it purely for exact traceability back
+      # to the commit that was built, per this task's explicit instruction
+      # not to remove it.
       - name: Build Docker image
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
         run: |
-          docker build -t "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}" services/${{ matrix.service }}
+          docker build \
+            -t "trushangdev/devops-poc-${{ matrix.service }}:${{ steps.version.outputs.version }}" \
+            -t "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}" \
+            services/${{ matrix.service }}
 
       - name: Trivy image scan - full report
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
         run: |
-          trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --exit-code 0 --ignorefile /dev/null "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}"
+          trivy image --severity CRITICAL,HIGH,MEDIUM,LOW --exit-code 0 --ignorefile /dev/null "trushangdev/devops-poc-${{ matrix.service }}:${{ steps.version.outputs.version }}"
 
       - name: Trivy image scan - policy gate (CRITICAL only)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
         run: |
-          trivy image --severity CRITICAL --exit-code 1 --ignorefile "${{ github.workspace }}/.trivyignore" "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}"
+          trivy image --severity CRITICAL --exit-code 1 --ignorefile "${{ github.workspace }}/.trivyignore" "trushangdev/devops-poc-${{ matrix.service }}:${{ steps.version.outputs.version }}"
 
-      # Docker Hub is only contacted on an approved push to develop - never
-      # from a pull_request, per the M10 PR-protection requirement.
+      # Docker Hub is only contacted on a release branch push - never from a
+      # pull_request, and never from a plain develop push.
       - name: Log in to Docker Hub
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Push image to Docker Hub
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+      - name: Push images to Docker Hub
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
         run: |
+          docker push "trushangdev/devops-poc-${{ matrix.service }}:${{ steps.version.outputs.version }}"
           docker push "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}"
 
-  # M10/M11: once a verified image is published to Docker Hub, bump the
-  # GitOps repository's desired state so the new image becomes deployable.
-  # This is the last CI-owned step in the pipeline - per PROJECT_SCOPE.md
-  # §11/§14, GitHub Actions must never deploy to Kubernetes directly; only
-  # the image tag recorded in Git is updated here. Argo CD (M13, not yet
-  # implemented) is what will later reconcile that Git change onto the
-  # cluster - this job never runs kubectl and never touches Minikube.
+  # M10/M11 (corrected for the §4 release-promotion flow): once a release
+  # branch push has published verified images to Docker Hub, bump the
+  # GitOps repository's desired state to the released SemVer tag - not the
+  # raw commit SHA - so Git always records an actual release, matching
+  # §13's own example ("chore: deploy user-service v1.2.0"). The SHA tag is
+  # still pushed to Docker Hub above for exact traceability, but the SemVer
+  # tag is what ends up deployed. This remains the last CI-owned step in
+  # the pipeline - per PROJECT_SCOPE.md §11/§14, GitHub Actions must never
+  # deploy to Kubernetes directly; Argo CD reconciles this Git change onto
+  # the cluster. This job never runs kubectl and never touches Minikube.
   update-gitops:
     name: Update GitOps repository
     needs: build-scan-publish
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout devops-poc-gitops (main)
@@ -99,6 +124,10 @@ jobs:
           ref: main
           token: ${{ secrets.GITOPS_REPO_TOKEN }}
 
+      - name: Extract release version from branch name
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#release/}" >> "$GITHUB_OUTPUT"
+
       # yq is preinstalled on GitHub-hosted ubuntu-latest runners. Only
       # these two scalar fields are touched - every other value in the
       # file (probes, resources, hpa, per-service db config, comments) is
@@ -106,7 +135,7 @@ jobs:
       - name: Bump image repository/tag in Helm values
         run: |
           yq -i '.image.repository = "trushangdev"' helm/microservices/values.yaml
-          yq -i '.image.tag = "${{ github.sha }}"' helm/microservices/values.yaml
+          yq -i '.image.tag = "${{ steps.version.outputs.version }}"' helm/microservices/values.yaml
 
       - name: Commit and push (only if the tag actually changed)
         run: |
@@ -116,6 +145,6 @@ jobs:
             echo "No change to helm/microservices/values.yaml - skipping commit."
           else
             git add helm/microservices/values.yaml
-            git commit -m "chore: deploy devops-poc services ${{ github.sha }}"
+            git commit -m "chore: deploy devops-poc services ${{ steps.version.outputs.version }}"
             git push origin main
           fi
