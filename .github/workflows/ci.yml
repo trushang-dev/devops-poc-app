@@ -33,6 +33,10 @@ jobs:
         working-directory: services/${{ matrix.service }}
         run: npm ci
 
+      - name: Run tests
+        working-directory: services/${{ matrix.service }}
+        run: npm test
+
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
@@ -74,3 +78,44 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
         run: |
           docker push "trushangdev/devops-poc-${{ matrix.service }}:${{ github.sha }}"
+
+  # M10/M11: once a verified image is published to Docker Hub, bump the
+  # GitOps repository's desired state so the new image becomes deployable.
+  # This is the last CI-owned step in the pipeline - per PROJECT_SCOPE.md
+  # §11/§14, GitHub Actions must never deploy to Kubernetes directly; only
+  # the image tag recorded in Git is updated here. Argo CD (M13, not yet
+  # implemented) is what will later reconcile that Git change onto the
+  # cluster - this job never runs kubectl and never touches Minikube.
+  update-gitops:
+    name: Update GitOps repository
+    needs: build-scan-publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout devops-poc-gitops (main)
+        uses: actions/checkout@v4
+        with:
+          repository: trushang-dev/devops-poc-gitops
+          ref: main
+          token: ${{ secrets.GITOPS_REPO_TOKEN }}
+
+      # yq is preinstalled on GitHub-hosted ubuntu-latest runners. Only
+      # these two scalar fields are touched - every other value in the
+      # file (probes, resources, hpa, per-service db config, comments) is
+      # left byte-for-byte untouched.
+      - name: Bump image repository/tag in Helm values
+        run: |
+          yq -i '.image.repository = "trushangdev"' helm/microservices/values.yaml
+          yq -i '.image.tag = "${{ github.sha }}"' helm/microservices/values.yaml
+
+      - name: Commit and push (only if the tag actually changed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- helm/microservices/values.yaml; then
+            echo "No change to helm/microservices/values.yaml - skipping commit."
+          else
+            git add helm/microservices/values.yaml
+            git commit -m "chore: deploy devops-poc services ${{ github.sha }}"
+            git push origin main
+          fi
