@@ -4,12 +4,14 @@ A local, end-to-end **DevOps + DevSecOps + GitOps** proof of concept: three Node
 
 This repository holds the **application source**. Everything else — Kubernetes manifests, Helm charts, Argo CD config, and the observability stack — lives in [`devops-poc-gitops`](https://github.com/trushang-dev/devops-poc-gitops).
 
+For the complete system (both repositories together) — architecture, CI/CD, GitOps, deployment/rollback, failure recovery, observability, and the full M0–M17 build journey — see that repository's [README](https://github.com/trushang-dev/devops-poc-gitops#readme), [ARCHITECTURE.md](https://github.com/trushang-dev/devops-poc-gitops/blob/main/ARCHITECTURE.md), and [PROJECT_JOURNEY.md](https://github.com/trushang-dev/devops-poc-gitops/blob/main/PROJECT_JOURNEY.md).
+
 ![Architecture: CI/CD + GitOps + Kubernetes + Observability](docs/architecture.png)
 
 ## What this demonstrates
 
 - Three independent Express microservices with health checks, Prometheus metrics, and unit tests
-- Multi-stage Docker builds, one image per service
+- One Docker image per service, built from a slim `node:22-alpine` base running as a non-root user
 - A GitHub Actions pipeline: test → filesystem security scan (Trivy) → image build → image security scan → publish to Docker Hub
 - A release-branch promotion model, so only reviewed, versioned code ever produces a deployable image
 - An automated handoff to the GitOps repository — CI never touches Kubernetes directly
