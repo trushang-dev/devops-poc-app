@@ -17,10 +17,12 @@ Default port: `3002` (override with `PORT`).
 |---|---|---|
 | GET | /health | Service health check |
 | GET | /products | In-memory list of products |
+| GET | /metrics | Prometheus metrics |
 
 ## Example
 
 ```bash
 curl http://localhost:3002/health
 curl http://localhost:3002/products
+curl http://localhost:3002/metrics
 ```

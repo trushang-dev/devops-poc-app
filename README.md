@@ -1,22 +1,52 @@
-# DevOps POC — Application
+# DevOps Microservices POC — Application
 
-This repository contains the Node.js application source code for the local DevOps Microservices POC.
+A local, end-to-end **DevOps + DevSecOps + GitOps** proof of concept: three Node.js microservices, containerized, security-scanned, continuously delivered through GitHub Actions and Docker Hub, and deployed to Kubernetes via a companion GitOps repository and Argo CD.
 
-## Responsibility
+This repository holds the **application source**. Everything else — Kubernetes manifests, Helm charts, Argo CD config, and the observability stack — lives in [`devops-poc-gitops`](https://github.com/trushang-dev/devops-poc-gitops).
 
-This repository contains:
+![Architecture: CI/CD + GitOps + Kubernetes + Observability](docs/architecture.png)
 
-- Node.js microservices
-- Application tests
-- Dockerfiles
-- GitHub Actions CI workflows
-- Application documentation
+## What this demonstrates
 
-Kubernetes and GitOps configuration belongs to the `devops-poc-gitops` repository.
+- Three independent Express microservices with health checks, Prometheus metrics, and unit tests
+- Multi-stage Docker builds, one image per service
+- A GitHub Actions pipeline: test → filesystem security scan (Trivy) → image build → image security scan → publish to Docker Hub
+- A release-branch promotion model, so only reviewed, versioned code ever produces a deployable image
+- An automated handoff to the GitOps repository — CI never touches Kubernetes directly
 
-## M1 — Application
+## Repository relationship
 
-M1 delivers three independent, runnable Node.js/Express services under `services/`. Each service uses an in-memory data set only — no database, authentication, or external dependency is required.
+```text
+devops-poc-app                devops-poc-gitops
+  (this repo)                  (companion repo)
+
+  services/*      ──build──▶  GitHub Actions
+                                    │
+                              test → scan → build
+                                    │
+                              Docker Hub push
+                                    │
+                        update helm/microservices/values.yaml
+                                    │
+                                    ▼
+                          devops-poc-gitops (Git)
+                                    │
+                                 Argo CD
+                                    │
+                                Kubernetes
+```
+
+`devops-poc-app` never deploys anything itself — it produces a versioned, scanned image and hands off to Git. See the [devops-poc-gitops docs](https://github.com/trushang-dev/devops-poc-gitops/tree/main/docs) for the deployment side of the pipeline.
+
+## Services
+
+| Service | Port | Business endpoint | Health | Metrics |
+|---|---:|---|---|---|
+| user-service | 3001 | `GET /users` (+ `GET /version`) | `GET /health` | `GET /metrics` |
+| product-service | 3002 | `GET /products` | `GET /health` | `GET /metrics` |
+| order-service | 3003 | `GET /orders` | `GET /health` | `GET /metrics` |
+
+Each service is a self-contained Express app with an in-memory dataset (no database dependency), structured logging, and Prometheus instrumentation (`prom-client`) including HTTP request latency histograms. Unknown routes return a JSON 404; unexpected errors return a JSON 500.
 
 ```text
 devops-poc-app/
@@ -24,206 +54,90 @@ devops-poc-app/
 │   ├── user-service/
 │   ├── product-service/
 │   └── order-service/
-├── README.md
-└── .gitignore
+├── docs/
+│   └── architecture.png
+├── docker-compose.yml
+└── .github/workflows/ci.yml
 ```
 
-## Services
+## Running locally
 
-| Service | Port | Purpose | Functional Endpoint |
-|---|---:|---|---|
-| user-service | 3001 | User APIs | `GET /users` |
-| product-service | 3002 | Product APIs | `GET /products` |
-| order-service | 3003 | Order APIs | `GET /orders` |
-
-Each service exposes:
-
-```text
-GET /health
-```
-
-returning HTTP 200 with the service name, status, and timestamp. Unknown routes return a JSON 404; unexpected errors return a JSON 500.
-
-Each service will eventually expose Prometheus metrics through:
-
-```text
-GET /metrics
-```
-
-### Install dependencies
+### Node.js directly
 
 ```bash
-cd services/user-service && npm install
-cd services/product-service && npm install
-cd services/order-service && npm install
+cd services/user-service && npm install && npm start   # or: npm run dev
 ```
 
-### Run a service
-
-```bash
-cd services/user-service && npm start      # or: npm run dev
-```
-
-`PORT` is configurable via environment variable and defaults to the port listed above.
-
-### Example curl commands
+`PORT` is configurable via environment variable and defaults to the port listed above. Repeat for `product-service` and `order-service`.
 
 ```bash
 curl http://localhost:3001/health
 curl http://localhost:3001/users
-
-curl http://localhost:3002/health
-curl http://localhost:3002/products
-
-curl http://localhost:3003/health
-curl http://localhost:3003/orders
+curl http://localhost:3001/metrics
 ```
 
-### M1 scope
-
-M1 covers only the Node.js application layer. The following are intentionally **not** implemented yet and belong to later milestones:
-
-- Docker / docker-compose
-- Kubernetes manifests
-- Helm charts
-- Argo CD
-- GitHub Actions / CI/CD
-- Trivy scanning
-- Prometheus / Grafana
-- PostgreSQL or any other database
-
-## Git Workflow
-
-```text
-feature/*
-    ↓
-develop
-    ↓
-release/*
-    ↓
-main
-```
-
-This repository uses a simple Git branching model for development and releases:
-
-- feature/*: short-lived branches where new features are developed (example: `feature/add-user-profile`).
-- develop: integration branch where feature branches are merged and tested together.
-- release/*: stabilization branches created from `develop` for preparing a release (example: `release/1.0.0`).
-- main: production-ready branch representing released code.
-
-Workflow summary:
-
-feature/* -> develop -> release/* -> main
-
-`main` = production, `develop` = integration, `feature/*` = development work, `release/*` = release preparation.
-
-## CI Workflow
-
-The eventual GitHub Actions pipeline will follow:
-
-```text
-Git Push / Pull Request
-        ↓
-Tests
-        ↓
-Trivy Scan
-        ↓
-Docker Build
-        ↓
-Trivy Image Scan
-        ↓
-Push Image to Docker Hub
-        ↓
-Update GitOps Repository
-```
-
-GitHub Actions must not directly deploy to Kubernetes.
-
-## Docker
-
-Each service will have a versioned image:
-
-```text
-docker.io/<username>/user-service:v1.0.0
-docker.io/<username>/product-service:v1.0.0
-docker.io/<username>/order-service:v1.0.0
-```
-
-Avoid using `latest` as the GitOps deployment version.
-
-### Build images
-
-From the repository root (`devops-poc-app`) you can build images individually:
-
-```bash
-docker build -t devops-poc/user-service:1.0.0 ./services/user-service
-docker build -t devops-poc/product-service:1.0.0 ./services/product-service
-docker build -t devops-poc/order-service:1.0.0 ./services/order-service
-```
-
-Or use Docker Compose to build and start all services:
+### Docker Compose (all three services)
 
 ```bash
 docker compose up --build -d
-```
-
-### Run containers
-
-Example (individual):
-
-```bash
-docker run --name devops-poc-user-service -p 3001:3001 -e PORT=3001 devops-poc/user-service:1.0.0
-```
-
-With Docker Compose the services are available on ports `3001`, `3002`, `3003`.
-
-### Test services
-
-```bash
 curl http://localhost:3001/health
-curl http://localhost:3001/users
-
 curl http://localhost:3002/health
-curl http://localhost:3002/products
-
 curl http://localhost:3003/health
-curl http://localhost:3003/orders
-
-curl http://localhost:3001/version
-```
-
-### Stop
-
-```bash
 docker compose down
 ```
 
-Notes:
-- Images used during M3 are local only and not pushed to Docker Hub.
-- `latest` is intentionally not used as the primary release tag; versioned tags (e.g. `1.0.0`) are used.
+### Tests
 
+```bash
+cd services/user-service && npm test
+```
 
-## Development Rules
+## CI/CD pipeline
 
-- Keep application logic simple.
-- Do not hardcode secrets.
-- Use environment variables for configuration.
-- Do not introduce unnecessary technologies.
-- Follow `../PROJECT_SCOPE.md`.
-- Follow `../CLAUDE OPERATING RULES.md`.
-
-## Repository Relationship
+Defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 ```text
-devops-poc-app
-      ↓
-GitHub Actions
-      ↓
-Docker Hub
-      ↓
-devops-poc-gitops
-      ↓
-Argo CD
-      ↓
-Kubernetes
+Push / Pull Request (develop)
+        │
+        ▼
+   npm test
+        │
+        ▼
+Trivy filesystem scan  (full report, then a CRITICAL-only gate)
+        │
+        ▼  ── only on a push to release/* ──
+        ▼
+  Docker image build   (tagged with SemVer + commit SHA)
+        │
+        ▼
+Trivy image scan       (full report, then a CRITICAL-only gate)
+        │
+        ▼
+   Docker Hub push
+        │
+        ▼
+Update devops-poc-gitops (bump Helm image tag, commit, push)
 ```
+
+Every service builds independently via a matrix job. Feature and `develop` pushes are validation-only (tests + filesystem scan); only a push to a `release/*` branch builds, scans, and publishes an image and updates the GitOps repository. GitHub Actions never runs `kubectl` or touches the cluster — Argo CD owns deployment.
+
+## Git workflow
+
+```text
+feature/*  →  develop  →  release/*  →  main
+```
+
+- `feature/*` — short-lived branches for new work
+- `develop` — integration branch
+- `release/*` — stabilization branch that CI promotes to a Docker Hub image + GitOps update
+- `main` — released code
+
+## Design principles
+
+- No secrets committed to source or baked into images — configuration comes from environment variables and Kubernetes Secrets (see the GitOps repo)
+- Every published image is immutably versioned (SemVer + commit SHA); `latest` is never used as a deployment tag
+- CI's blast radius stops at "can push a Git commit" — it has no cluster credentials
+
+## License
+
+MIT — see [LICENSE](LICENSE).
