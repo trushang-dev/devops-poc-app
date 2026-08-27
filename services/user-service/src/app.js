@@ -44,7 +44,7 @@ const users = [
   { id: 1, name: 'Alice Johnson', email: 'alice@example.com' },
   { id: 2, name: 'Bob Smith', email: 'bob@example.com' },
   { id: 3, name: 'Carol Williams', email: 'carol@example.com' },
-  { id: 4, name: 'Trushang Suthar', email: 'trushang.dev@gmail.com' },
+  { id: 4, name: 'Dana Lee', email: 'dana@example.com' },
 ];
 
 app.get('/metrics', async (req, res) => {
